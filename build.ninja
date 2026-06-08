@@ -1,0 +1,35 @@
+program_name = svgtogpl
+main = main
+mglibc = mglibc
+
+mgsrc = $$MGLIBC_STRINGS
+# tcc doesn't have debug info ...
+# also compile commands don't seem to be working with bear
+toolchain = tcc
+
+rule cc
+    command = $toolchain $cflags -MD -MF $out.d -c -o $out $in $includes
+    depfile = $out.d
+    description = $in
+
+rule link
+    command = $toolchain -o $out $in $ldflags
+
+cflags = -g
+ldflags = -lm
+includes = 
+
+outdir = .build
+srcdir = src
+
+
+###  EXT  ###
+build $outdir/libs.o: cc $srcdir/compile_libs.c
+    includes = -I$mgsrc
+
+###  OWN  ###
+build $outdir/$main.o: cc $srcdir/$main.c
+    includes = -I$mgsrc
+
+
+build $outdir/$program_name: link $outdir/$main.o $outdir/libs.o
