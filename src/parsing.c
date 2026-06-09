@@ -34,6 +34,8 @@ Sectionizer sectionizer_init(str content)
                          .cur_matcher_idx = MATCHER_UNSET};
 }
 
+// PERF: multi sectionizer is pretty slow -> for the sections this almost double
+// the runtime -> not quite sure why it is so heavy (350 -> 650 ms)
 void sectionizer_add(Sectionizer* sec, Matcher start, Matcher end)
 {
     assert(sec->matcher_count < MAX_MATCHERS);
@@ -115,7 +117,65 @@ SectionizerResult sectionizer_next(Sectionizer* sec)
     return cur;
 }
 
-rgb hex_to_rgb(str hexStr)
+int number_within_str(str numstr)
+{
+    int startIdx = 0;
+    int endExIdx = numstr.len;
+    bool leftFound = false;
+
+    for (int i = 0; i < numstr.len; i++)
+    {
+        if (!leftFound && isdigit(numstr.chars[i]))
+        {
+            startIdx = i;
+            leftFound = true;
+        }
+        else if (leftFound && !isdigit(numstr.chars[i]))
+        {
+            endExIdx = i;
+            break;
+        }
+    }
+
+    int len = endExIdx - startIdx;
+    // if no valid digits are found, we'll have len 0 and return the error code
+    // -> We do this because atoi never returns a errors state
+    if (len == 0) return ERR_NO;
+
+    str substr = str_allocn_opt((StrPoolOptions){.pool = &Strings.transient},
+                                numstr.chars + startIdx, len);
+
+    int num = atoi(substr.chars);
+    str_pool_reset(&Strings.transient);
+
+    return num;
+}
+
+SvgLinGradStop find_color_by_id(str strWithId, SvgContent svg)
+{
+    SvgLinGradStop stop = {};
+    int colorId = number_within_str(strWithId);
+    if (colorId == ERR_NO)
+    {
+        TRACE("Didn't find colorId within str: '%'", STR(strWithId));
+        return stop;
+    }
+
+    for (int stopIdx = 0; stopIdx < svg.stop_count; stopIdx++)
+    {
+        stop = svg.stops[stopIdx];
+        if (stop.id == colorId)
+        {
+            return stop;
+        }
+    }
+    TRACE("Didn't find stop color for id % (searched % stop entries)",
+          NUM(colorId), NUM(svg.stop_count));
+
+    return stop;
+}
+
+rgb hex_to_rgb(str hexStr, SvgContent svg)
 {
     const char* hex = hexStr.chars;
     rgb color = {};
@@ -126,8 +186,8 @@ rgb hex_to_rgb(str hexStr)
     }
     else if (hexStr.len < 6)
     {
-        str_printc("Invalid hex string: '%'", STR(hexStr));
-        return color;
+        TRACE("Invalid hex string: '%'", STR(hexStr));
+        return NULL_COLOR;
     }
 
     // Validate characters are hex digits
@@ -135,13 +195,11 @@ rgb hex_to_rgb(str hexStr)
     {
         if (!isxdigit((unsigned char)hex[i]))
         {
-            str_printc("Hex string contains non hex characters: '%'",
-                       STR(hexStr));
-            return color;
+            TRACE("Hex string contains non hex characters: '%'", STR(hexStr));
+            return NULL_COLOR;
         }
     }
 
-    // Parse components
     char r_str[3] = {hex[0], hex[1], '\0'};
     char g_str[3] = {hex[2], hex[3], '\0'};
     char b_str[3] = {hex[4], hex[5], '\0'};

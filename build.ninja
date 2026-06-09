@@ -6,6 +6,7 @@ mgsrc = $$MGLIBC_STRINGS
 # tcc doesn't have debug info ...
 # also compile commands don't seem to be working with bear
 toolchain = tcc
+trace = -DLOG_TRACE=0
 
 rule cc
     command = $toolchain $cflags -MD -MF $out.d -c -o $out $in $includes
@@ -15,7 +16,7 @@ rule cc
 rule link
     command = $toolchain -o $out $in $ldflags
 
-cflags = -g
+cflags = -g $trace
 ldflags = -lm
 includes = 
 

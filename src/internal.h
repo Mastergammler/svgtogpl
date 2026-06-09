@@ -8,6 +8,20 @@
 
 #define MATCHER_UNSET -1
 #define MAX_MATCHERS 4
+#define ERR_NO -1
+
+#ifndef NULL_COLOR
+#define NULL_COLOR (rgb){1, 2, 3}
+#endif
+
+#ifndef LOG_TRACE
+#define LOG_TRACE false
+#endif
+
+#define TRACE(msg, ...)                                                        \
+    if (LOG_TRACE) str_printc(msg, __VA_ARGS__);
+
+StringMemory Strings;
 
 typedef struct
 {
@@ -38,11 +52,22 @@ typedef struct
 
 typedef struct
 {
+    int id;
+    str content;
+    str fill_color_hex;
+    rgb color;
+} SvgLinGradStop;
+
+typedef struct
+{
     int svg_bytes;
     char* file;
     char* cursor;
+    SvgLinGradStop* stops;
+    int stop_count;
     SvgRect* rects;
     int rect_count;
+
 } SvgContent;
 
 typedef struct
@@ -51,6 +76,14 @@ typedef struct
     bool inclusive;
     int index;
 } Matcher;
+
+typedef struct
+{
+    bool active;
+    float min_x;
+    float min_y;
+
+} RectFilter;
 
 typedef struct
 {

@@ -6,10 +6,8 @@
 //  ✔ print their colors + x,y to the console
 //  ✔ parse the values
 //  - save the results to file
-//  - additional filter for boundary box
+//  ✔ additional filter for boundary box
 //  ✔ find values of lineargradients (just match to swatch num?)
-
-StringMemory Strings;
 
 Args read_args(Arena* mem, int argc, char** argv)
 {
@@ -33,13 +31,20 @@ typedef enum
 
 typedef enum
 {
+    STOPP_COLOR,
+    STOPP_ID,
+    STOPP_count
+} StopPropIds;
+
+typedef enum
+{
     PROP_FILL,
     PROP_POS_X,
     PROP_POS_Y,
     PROP_count
 } PropertyMatcherIds;
 
-void run(str file, Arena* mem)
+void run(str file, RectFilter filter, Arena* mem)
 {
     Timer t = {};
     timer_start(&t);
@@ -62,24 +67,95 @@ void run(str file, Arena* mem)
     fread(content.file, 1, content.svg_bytes, svg);
 
     float readTime = timer_ms_since_start(&t);
-    str_printc("Reading file: %, len: % B in % ms", STR(file),
-               NUM(content.svg_bytes), FLOAT(readTime, 3));
+    timer_start(&t);
 
-    Sectionizer sn = sectionizer_init_one(
-        (str){content.file, content.svg_bytes},
-        (Matcher){.match = str_alloc("<rect"), .inclusive = true},
-        (Matcher){.match = str_alloc(">"), .inclusive = true});
+    Sectionizer sn = sectionizer_init((str){content.file, content.svg_bytes});
+    sectionizer_add(&sn, (Matcher){str_alloc("<rect"), true},
+                    (Matcher){str_alloc(">"), true});
+    sectionizer_add(&sn, (Matcher){str_alloc("<stop"), true},
+                    (Matcher){str_alloc(">"), true});
 
-    content.rects = mem->memory + mem->cursor;
     SectionizerResult res = sectionizer_next(&sn);
+    bool withinStopSection = true;
     while (res.section.len > 0)
     {
-        // TODO: add parser for stop thingies
-        SvgRect* r = (SvgRect*)arena_use(mem, sizeof(SvgRect));
-        r->content = res.section;
-        content.rect_count++;
+        SectionMatcherIds secId = (SectionMatcherIds)res.matcher_idx;
+
+        switch (secId)
+        {
+        case SECTION_RECT:
+        {
+            if (!content.rects) content.rects = mem->memory + mem->cursor;
+            if (withinStopSection) withinStopSection = false;
+            SvgRect* r = (SvgRect*)arena_use(mem, sizeof(SvgRect));
+            r->content = res.section;
+            content.rect_count++;
+        }
+        break;
+        case SECTION_STOP:
+        {
+            if (!content.stops) content.stops = mem->memory + mem->cursor;
+            if (!withinStopSection)
+            {
+                str_printc("Unexpected: Found stop section after starting "
+                           "rects, skipping: '%'",
+                           res.section);
+            }
+            else
+            {
+                SvgLinGradStop* r =
+                    (SvgLinGradStop*)arena_use(mem, sizeof(SvgLinGradStop));
+                r->content = res.section;
+                content.stop_count++;
+            }
+        }
+        break;
+        default:
+            assert(false);
+        };
+
         res = sectionizer_next(&sn);
     }
+
+    // --------------  PARSE STOPS / GRADIENTS ----------
+
+    Matcher stopStart = {str_alloc("stop-color:"), false};
+    Matcher stopEnd = {str_alloc(";"), false};
+    Matcher idStart = {str_alloc("id=\""), false};
+    Matcher idEnd = {str_alloc("\""), false};
+    for (int i = 0; i < content.stop_count; i++)
+    {
+        SvgLinGradStop* stop = &content.stops[i];
+        Sectionizer sn = sectionizer_init(stop->content);
+
+        sectionizer_add(&sn, stopStart, stopEnd);
+        sectionizer_add(&sn, idStart, idEnd);
+
+        for (int s = 0; s < STOPP_count; s++)
+        {
+            SectionizerResult res = sectionizer_next(&sn);
+            switch ((StopPropIds)res.matcher_idx)
+            {
+            case STOPP_COLOR:
+            {
+                stop->fill_color_hex = res.section;
+                stop->color = hex_to_rgb(stop->fill_color_hex, content);
+            }
+            break;
+            case STOPP_ID:
+            {
+                stop->id = number_within_str(res.section);
+            }
+            break;
+            default:
+                assert(false);
+            }
+        }
+
+        str_pool_reset(&Strings.print_buffer);
+    }
+
+    // --------------  PARSE RECTS ----------------------
 
     SectionMatcher fill = {};
     fill.start = (Matcher){.match = str_alloc("fill:"), .inclusive = false};
@@ -91,8 +167,8 @@ void run(str file, Arena* mem)
 
     for (int i = 0; i < content.rect_count; i++)
     {
-        SvgRect rect = content.rects[i];
-        Sectionizer sn = sectionizer_init(rect.content);
+        SvgRect* rect = &content.rects[i];
+        Sectionizer sn = sectionizer_init(rect->content);
         sectionizer_add(&sn, fill.start, fill.end);
         sectionizer_add(&sn, xStart, posEnd);
         sectionizer_add(&sn, yStart, posEnd);
@@ -105,19 +181,27 @@ void run(str file, Arena* mem)
             {
             case PROP_FILL:
             {
-                rect.fill_color_hex = res.section;
-                // TODO: lookup gradient colors
-                rect.color = hex_to_rgb(rect.fill_color_hex);
+                rect->fill_color_hex = res.section;
+                rect->color = hex_to_rgb(rect->fill_color_hex, content);
+
+                // lookup color from the gradients (stop-color sections)
+                if (!memcmp(&rect->color, &NULL_COLOR, sizeof(rgb)))
+                {
+                    SvgLinGradStop stop =
+                        find_color_by_id(res.section, content);
+                    rect->fill_color_hex = stop.fill_color_hex;
+                    rect->color = stop.color;
+                }
             }
             break;
             case PROP_POS_X:
             {
-                rect.pos_x = atof(res.section.chars);
+                rect->pos_x = atof(res.section.chars);
             }
             break;
             case PROP_POS_Y:
             {
-                rect.pos_y = atof(res.section.chars);
+                rect->pos_y = atof(res.section.chars);
             }
             break;
             default:
@@ -125,21 +209,36 @@ void run(str file, Arena* mem)
             };
         }
 
-        if (rect.pos_x >= -500 && rect.pos_y >= -500)
+        if (!filter.active ||
+            (rect->pos_x >= filter.min_x && rect->pos_y >= filter.min_y))
         {
-            str_printc("(%,%) % (%,%,%)", FLOAT(rect.pos_x, 1),
-                       FLOAT(rect.pos_y, 1), STR(rect.fill_color_hex),
-                       NUM(rect.color.r), NUM(rect.color.g), NUM(rect.color.b));
+            str_printc("(%,%) % (%,%,%)", FLOAT(rect->pos_x, 1),
+                       FLOAT(rect->pos_y, 1), STR(rect->fill_color_hex),
+                       NUM(rect->color.r), NUM(rect->color.g),
+                       NUM(rect->color.b));
 
-            if (!memcmp(&rect.color, &(rgb){}, sizeof(rgb)))
+            if (!memcmp(&rect->color, &NULL_COLOR, sizeof(rgb)))
             {
-                str_printc("Wired section: '%'", STR(rect.content));
+                TRACE("Undetermined color section: '%'", STR(rect->content));
             }
         }
         str_pool_reset(&Strings.print_buffer);
     }
 
-    str_printc("Found % rect sections", NUM(content.rect_count));
+    float parsingTime = timer_ms_since_start(&t);
+    timer_start(&t);
+
+    // parse filename
+    // open file
+    // write header
+    // write values
+
+    float writeTime = timer_ms_since_start(&t);
+    str_printc("Reading file: %, len: % KB in % ms | % ms parsing", STR(file),
+               NUM(content.svg_bytes / 1024), FLOAT(readTime, 3),
+               FLOAT(parsingTime, 3));
+    str_printc("Found % stops & % rects sections", NUM(content.stop_count),
+               NUM(content.rect_count));
 }
 
 int main(int argc, char** argv)
@@ -155,11 +254,19 @@ int main(int argc, char** argv)
     Args args = read_args(&mainmem, argc, argv);
     if (args.count < 2)
     {
-        str_printc("Usage: <file.svg>");
+        str_printc("Usage: <file.svg> [<minx> <miny>]");
         return 1;
     }
 
-    run(args.values[1], &mainmem);
+    RectFilter filter = {};
+    if (args.count >= 4)
+    {
+        filter.active = true;
+        filter.min_x = atof(args.values[2].chars);
+        filter.min_y = atof(args.values[3].chars);
+    }
+
+    run(args.values[1], filter, &mainmem);
 
     float runTime = timer_ms_since_start(&t);
     str_printc("| % ms | Execution time", FLOAT(runTime, 3));
