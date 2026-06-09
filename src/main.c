@@ -5,7 +5,7 @@
 //  ✔ find all rects
 //  ✔ print their colors + x,y to the console
 //  ✔ parse the values
-//  - save the results to file
+//  ✔ save the results to file
 //  ✔ additional filter for boundary box
 //  ✔ find values of lineargradients (just match to swatch num?)
 
@@ -228,17 +228,48 @@ void run(str file, RectFilter filter, Arena* mem)
     float parsingTime = timer_ms_since_start(&t);
     timer_start(&t);
 
-    // parse filename
-    // open file
-    // write header
-    // write values
+    sort_rects(content);
+
+    StrSplitResult splitRes = str_split_last(file, '.');
+    str newFile = str_formatc("%.gpl", STR(splitRes.head));
+    str fileName = str_split_last(newFile, '/').last;
+    str header = str_formatc("GIMP Palette\nName: %\n#\n", STR(fileName));
+
+    FILE* gplOut = fopen(newFile.chars, "w");
+    long bytesWritten = 0;
+    if (gplOut)
+    {
+        bytesWritten += fwrite(header.chars, 1, header.len, gplOut);
+
+        for (int i = 0; i < content.rect_count; i++)
+        {
+            SvgRect rect = content.rects[i];
+            if (!filter.active ||
+                (rect.pos_x >= filter.min_x && rect.pos_y >= filter.min_y))
+            {
+                str colorLine = str_formatc_opt(
+                    (StrPoolOptions){.pool = &Strings.transient}, "% % % %\n",
+                    NUM_PAD(rect.color.r, 3), NUM_PAD(rect.color.g, 3),
+                    NUM_PAD(rect.color.b, 3), STR(rect.fill_color_hex));
+                bytesWritten +=
+                    fwrite(colorLine.chars, 1, colorLine.len, gplOut);
+                str_pool_reset(&Strings.transient);
+            }
+        }
+    }
+    else
+    {
+        str_printc("Could not create file '%' for writing", STR(newFile));
+    }
 
     float writeTime = timer_ms_since_start(&t);
-    str_printc("Reading file: %, len: % KB in % ms | % ms parsing", STR(file),
-               NUM(content.svg_bytes / 1024), FLOAT(readTime, 3),
-               FLOAT(parsingTime, 3));
     str_printc("Found % stops & % rects sections", NUM(content.stop_count),
                NUM(content.rect_count));
+    str_printc("Generated '%' (% B) from '%'", STR(newFile), NUM(bytesWritten),
+               STR(file));
+    str_printc("| % ms Reading % KB | % ms parsing | % ms writing % Bytes |",
+               FLOAT(readTime, 3), NUM(content.svg_bytes / 1024),
+               FLOAT(parsingTime, 3), FLOAT(writeTime, 3), NUM(bytesWritten));
 }
 
 int main(int argc, char** argv)
