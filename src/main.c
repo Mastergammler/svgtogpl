@@ -1,5 +1,7 @@
 
 #include "parsing.c"
+#include "sort.c"
+
 // TASKLIST:
 //  ✔ load the svg file, via cmd arg
 //  ✔ find all rects
@@ -8,6 +10,7 @@
 //  ✔ save the results to file
 //  ✔ additional filter for boundary box
 //  ✔ find values of lineargradients (just match to swatch num?)
+//  - Order the values based on position -> because the svg doesn't guarantee it
 
 Args read_args(Arena* mem, int argc, char** argv)
 {
