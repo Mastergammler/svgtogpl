@@ -208,5 +208,13 @@ rgb hex_to_rgb(str hexStr, SvgContent svg)
     color.g = (uint8_t)strtoul(g_str, NULL, 16);
     color.b = (uint8_t)strtoul(b_str, NULL, 16);
 
+    // NOTE: inkscape treats white as some special color in the editor
+    //  -> i don't need this, i need it to be the same as the others,
+    //  because i use them as placeholders
+    if (color.r == UINT8_MAX && color.g == UINT8_MAX && color.b == UINT8_MAX)
+    {
+        color.b = UINT8_MAX - 1;
+    }
+
     return color;
 }
