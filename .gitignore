@@ -5,3 +5,4 @@ compile_commands.json
 lsp.index
 *.txt
 tags
+Makefile

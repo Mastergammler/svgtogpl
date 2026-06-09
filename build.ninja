@@ -3,8 +3,6 @@ main = main
 mglibc = mglibc
 
 mgsrc = $$MGLIBC_STRINGS
-# tcc doesn't have debug info ...
-# also compile commands don't seem to be working with bear
 toolchain = tcc
 trace = -DLOG_TRACE=0
 
